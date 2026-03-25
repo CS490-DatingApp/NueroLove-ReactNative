@@ -1,0 +1,14 @@
+ # Navigate to backend folder                                                       
+  cd "path\to\Neruo-ReactNative\backend"
+                                                                                     
+  # Create virtual environment (first time only)                                   
+  python -m venv venv
+
+  # Activate virtual environment
+  venv\Scripts\activate
+
+  # Install dependencies (first time only)
+  pip install -r requirements.txt
+
+  # Run the server
+  uvicorn app.main:app --reload --port 8000
