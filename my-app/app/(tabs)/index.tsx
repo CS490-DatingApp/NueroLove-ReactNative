@@ -33,8 +33,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Derive a friendly display name from the email
-  const firstName = user?.email.split("@")[0] ?? "there";
+  const firstName = user?.first_name ?? user?.display_name ?? user?.email?.split("@")[0] ?? "there";
 
   const cards: QuickCard[] = [
     {

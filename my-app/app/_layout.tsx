@@ -40,7 +40,7 @@ function NavigationGuard() {
     // Wait until SecureStore hydration is complete
     if (isLoading) return;
 
-    const currentUserId = user?.id ?? null;
+    const currentUserId = user?.uid ?? null;
 
     // Clear chat history whenever the active user changes (logout, or
     // a different account signs in) so messages never leak between sessions

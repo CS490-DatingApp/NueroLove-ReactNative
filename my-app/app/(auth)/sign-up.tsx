@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { uploadPhotos } from "@/utils/uploadPhoto";
 import {
   GENDERS,
   INTEREST_OPTIONS,
@@ -678,7 +679,7 @@ export default function ProfileCreate(): React.JSX.Element {
           data = await res.json();
         } catch {}
         if (!res.ok) throw new Error((data.detail as string) || "Registration failed");
-        await register(data.token, data.user);
+        await register(data.token as string, data.user as NonNullable<import("@/types/auth").User>, data.refresh_token as string);
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Something went wrong. Try again.");
         setRegistering(false);
@@ -726,6 +727,9 @@ export default function ProfileCreate(): React.JSX.Element {
             setSubmitError(null);
             const payload = buildPayload(values);
             try {
+              // Upload local photos to Cloudinary first
+              const uploadedPhotos = await uploadPhotos(payload.photos);
+
               const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
                 method: "POST",
                 headers: {
@@ -747,7 +751,7 @@ export default function ProfileCreate(): React.JSX.Element {
                   height_cm: payload.heightCm ?? null,
                   looking_for: payload.lookingFor ?? null,
                   interests: payload.interests,
-                  photos: payload.photos,
+                  photos: uploadedPhotos.filter(Boolean),
                 }),
               });
               if (!res.ok) {

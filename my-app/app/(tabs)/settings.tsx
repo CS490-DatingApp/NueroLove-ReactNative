@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/Input";
 import { ScreenHeader } from "@/components/ui/ScreenHeader";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { uploadPhotos } from "@/utils/uploadPhoto";
 import {
   INTEREST_OPTIONS,
   LOOKING_FOR,
@@ -242,6 +243,9 @@ export default function SettingsScreen() {
     setSaveError(null);
     setSaved(false);
     try {
+      // Upload any new local photos to Cloudinary first
+      const uploadedPhotos = await uploadPhotos(form.photos);
+
       const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
         method: "POST",
         headers: {
@@ -258,7 +262,7 @@ export default function SettingsScreen() {
           pronouns: form.pronouns.trim() || null,
           looking_for: form.lookingFor || null,
           interests: form.interests,
-          photos: form.photos.filter(Boolean),
+          photos: uploadedPhotos.filter(Boolean),
         }),
       });
       if (!res.ok) {
@@ -266,9 +270,27 @@ export default function SettingsScreen() {
         try { body = await res.json(); } catch {}
         throw new Error(body.detail || "Failed to save profile");
       }
-      setOriginal(form);
+      const savedForm = { ...form, photos: uploadedPhotos };
+      setForm(savedForm);
+      setOriginal(savedForm);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+
+      // Re-embed personality if bio or interests changed
+      const bioChanged = form.bio.trim() !== original.bio.trim();
+      const interestsChanged = JSON.stringify(form.interests) !== JSON.stringify(original.interests);
+      if ((bioChanged || interestsChanged) && token) {
+        const conversation = [
+          form.bio.trim() ? `User bio: ${form.bio.trim()}.` : "",
+          form.interests.length ? `Interests: ${form.interests.join(", ")}.` : "",
+          form.lookingFor ? `Looking for: ${form.lookingFor}.` : "",
+        ].filter(Boolean).join(" ");
+        fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/onboarding/summarize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ conversation }),
+        }).catch(() => {}); // fire and forget
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -511,6 +533,33 @@ export default function SettingsScreen() {
             await logout();
           }}
         />
+        <Button
+          label="Delete Account"
+          variant="ghost"
+          onPress={() => {
+            Alert.alert(
+              "Delete Account",
+              "This will permanently delete your profile, matches, and all data. This cannot be undone.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/delete-account`, {
+                        method: "DELETE",
+                        headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      });
+                    } catch {}
+                    await logout();
+                  },
+                },
+              ]
+            );
+          }}
+          style={s.deleteBtn}
+        />
       </ScrollView>
     </View>
   );
@@ -575,6 +624,7 @@ const s = StyleSheet.create({
   interestChipTextActive: { color: "#fff" },
 
   saveBtn: { marginBottom: 8 },
+  deleteBtn: { marginTop: 8, borderWidth: 0 },
 });
 
 const ps = StyleSheet.create({

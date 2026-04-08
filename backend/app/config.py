@@ -1,15 +1,30 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT_DIR / ".env"
 
 
 class Settings(BaseSettings):
-    openai_api_key: str = ""
-    jwt_secret: str = "dev-secret-change-in-production"
-    database_url: str = "sqlite+aiosqlite:///./neuro.db"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_days: int = 30
+    # Firebase
+    firebase_credentials_path: str | None = Field(default=None)
+    firebase_project_id: str | None = Field(default=None)
+    firebase_credentials_json: str | None = Field(default=None)
+    firebase_web_api_key: str | None = Field(default=None)
 
-    class Config:
-        env_file = ".env"
+    # OpenAI
+    openai_api_key: str | None = Field(default=None)
+
+    # Qdrant
+    qdrant_url: str | None = Field(default=None)
+    qdrant_api_key: str | None = Field(default=None)
+
+    model_config = {
+        "env_file": str(ENV_FILE) if ENV_FILE.exists() else None,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()

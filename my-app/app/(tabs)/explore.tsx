@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Modal,
@@ -50,70 +51,6 @@ type Profile = {
   compatibility?: number;
 };
 
-/* ─── mock data ──────────────────────────────────────────────────────────── */
-
-const MOCK_PROFILES: Profile[] = [
-  {
-    id: "1",
-    name: "Sofia",
-    age: 26,
-    city: "Los Angeles, CA",
-    bio: "Coffee lover, weekend hiker, and part-time chef. Looking for someone to explore the city with.",
-    interests: ["Hiking", "Cooking", "Travel"],
-    avatarColor: "#f59e0b",
-    jobTitle: "UX Designer",
-  },
-  {
-    id: "2",
-    name: "Jordan",
-    age: 29,
-    city: "Santa Monica, CA",
-    bio: "Creative director by day, surfer at dawn. Big believer in spontaneous road trips and good playlists.",
-    interests: ["Surfing", "Art", "Music"],
-    avatarColor: "#10b981",
-    jobTitle: "Creative Director",
-  },
-  {
-    id: "3",
-    name: "Maya",
-    age: 24,
-    city: "Pasadena, CA",
-    bio: "PhD student studying neuroscience. I balance lab life with yoga, bookstores, and terrible puns.",
-    interests: ["Reading", "Yoga", "Science"],
-    avatarColor: "#ec4899",
-    jobTitle: "PhD Student",
-  },
-  {
-    id: "4",
-    name: "Alex",
-    age: 31,
-    city: "Venice Beach, CA",
-    bio: "Architect and amateur photographer. Always looking for interesting light and interesting people.",
-    interests: ["Photography", "Architecture", "Coffee"],
-    avatarColor: "#6366f1",
-    jobTitle: "Architect",
-  },
-  {
-    id: "5",
-    name: "Riley",
-    age: 27,
-    city: "Silver Lake, CA",
-    bio: "Musician and dog dad. I play bass in a band on weekends and make great breakfast burritos.",
-    interests: ["Music", "Dogs", "Cooking"],
-    avatarColor: "#ef4444",
-    jobTitle: "Music Teacher",
-  },
-  {
-    id: "6",
-    name: "Casey",
-    age: 28,
-    city: "Burbank, CA",
-    bio: "Film editor with a soft spot for horror movies and farmers markets. Fluent in sarcasm.",
-    interests: ["Film", "Food", "Travel"],
-    avatarColor: "#0ea5e9",
-    jobTitle: "Film Editor",
-  },
-];
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
@@ -161,7 +98,6 @@ function ProfileGridCard({
         ) : (
           <Text style={g.initial}>{profile.name[0]}</Text>
         )}
-        <View style={g.photoOverlay} />
       </View>
 
       <View style={g.info}>
@@ -191,29 +127,86 @@ function ProfileDetailModal({
 }) {
   const [liked, setLiked] = useState(false);
   const [liking, setLiking] = useState(false);
+  const [matchAlert, setMatchAlert] = useState(false);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
     setLiked(false);
+    setMatchAlert(false);
   }, [profile?.id]);
 
   const handleLike = async () => {
     if (!profile || liking) return;
     setLiking(true);
     try {
-      await fetch(
+      const res = await fetch(
         `${process.env.EXPO_PUBLIC_API_BASE_URL}/matches/${profile.id}/like`,
         {
           method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
         },
       );
+      const data = await res.json();
       setLiked(true);
+      if (data.match) setMatchAlert(true);
     } catch {
       setLiked((v) => !v);
     } finally {
       setLiking(false);
     }
+  };
+
+  const handleBlock = async () => {
+    if (!profile) return;
+    Alert.alert("Block User", `Block ${profile.name}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Block",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(
+              `${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/${profile.id}/block`,
+              {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+            );
+            onClose();
+          } catch {}
+        },
+      },
+    ]);
+  };
+
+  const handleReport = async () => {
+    if (!profile) return;
+    Alert.alert("Report User", `Report ${profile.name}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Report",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(
+              `${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/${profile.id}/report`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ reason: "Reported from explore" }),
+              },
+            );
+            Alert.alert("Reported", "Thank you for your report.");
+          } catch {}
+        },
+      },
+    ]);
   };
 
   if (!profile) return null;
@@ -284,6 +277,12 @@ function ProfileDetailModal({
             </View>
           )}
 
+          {matchAlert && (
+            <View style={md.matchBanner}>
+              <Text style={md.matchBannerText}>It's a match!</Text>
+            </View>
+          )}
+
           <Button
             label={liked ? "♥  Liked!" : "♡  Like"}
             variant={liked ? "secondary" : "primary"}
@@ -291,6 +290,15 @@ function ProfileDetailModal({
             onPress={handleLike}
             style={md.likeBtn}
           />
+
+          <View style={md.safetyRow}>
+            <Pressable onPress={handleBlock} style={md.safetyBtn}>
+              <Text style={md.safetyBtnText}>Block</Text>
+            </Pressable>
+            <Pressable onPress={handleReport} style={md.safetyBtn}>
+              <Text style={md.safetyBtnText}>Report</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </View>
     </Modal>
@@ -304,22 +312,23 @@ export default function ExploreScreen() {
   const { token, user } = useAuth();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Profile | null>(null);
 
   const myInterests: string[] = user?.interests ?? [];
 
   const loadProfiles = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_API_BASE_URL}/matches/discover`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
-      if (!res.ok) throw new Error("not ok");
+      if (!res.ok) throw new Error("Failed to load matches");
       const data: any[] = await res.json();
-      if (!data.length) throw new Error("empty");
 
-      const mapped: Profile[] = data.map((p) => ({
+      const mapped: Profile[] = data.map((p: any) => ({
         id: String(p.id ?? p.user_id),
         name: p.first_name ?? p.name ?? "?",
         age: p.age ?? 0,
@@ -329,21 +338,12 @@ export default function ExploreScreen() {
         avatarColor: "#7C3AED",
         photoUri: p.photos?.[0] ?? undefined,
         jobTitle: p.job_title ?? undefined,
+        compatibility: p.compatibility ?? calcCompatibility(myInterests, p.interests ?? []),
       }));
 
-      setProfiles(
-        mapped.map((p) => ({
-          ...p,
-          compatibility: calcCompatibility(myInterests, p.interests),
-        })),
-      );
-    } catch {
-      setProfiles(
-        MOCK_PROFILES.map((p) => ({
-          ...p,
-          compatibility: calcCompatibility(myInterests, p.interests),
-        })),
-      );
+      setProfiles(mapped);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -363,6 +363,18 @@ export default function ExploreScreen() {
       {loading ? (
         <View style={s.center}>
           <ActivityIndicator size="large" color={Purple.primary} />
+        </View>
+      ) : error ? (
+        <View style={s.center}>
+          <Text style={s.emptyText}>{error}</Text>
+          <Pressable onPress={loadProfiles} style={s.retryBtn}>
+            <Text style={s.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : profiles.length === 0 ? (
+        <View style={s.center}>
+          <Text style={s.emptyText}>No one new to discover yet.</Text>
+          <Text style={s.emptySubText}>Check back soon as more people join!</Text>
         </View>
       ) : (
         <FlatList
@@ -393,9 +405,13 @@ export default function ExploreScreen() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#fff" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 32 },
   listContent: { paddingHorizontal: H_PAD, paddingTop: CARD_GAP, paddingBottom: 24, gap: CARD_GAP },
   columnWrapper: { gap: CARD_GAP },
+  emptyText: { fontSize: 16, fontWeight: "600", color: "#333", textAlign: "center" },
+  emptySubText: { fontSize: 13, color: "#999", textAlign: "center" },
+  retryBtn: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 999, backgroundColor: Purple.primary },
+  retryText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
 
 const g = StyleSheet.create({
@@ -416,14 +432,6 @@ const g = StyleSheet.create({
     justifyContent: "center",
   },
   initial: { fontSize: 56, fontWeight: "700", color: "#fff" },
-  photoOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 50,
-    backgroundColor: "rgba(0,0,0,0.22)",
-  },
   info: {
     flexDirection: "row",
     alignItems: "center",
@@ -496,4 +504,24 @@ const md = StyleSheet.create({
   },
   chipText: { fontSize: 13, color: Purple.primary, fontWeight: "600" },
   likeBtn: { marginTop: 12 },
+  matchBanner: {
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#86efac",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  matchBannerText: { color: "#166534", fontSize: 16, fontWeight: "700" },
+  safetyRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 24,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e5e5",
+  },
+  safetyBtn: { paddingVertical: 8, paddingHorizontal: 12 },
+  safetyBtnText: { fontSize: 13, color: "#999" },
 });

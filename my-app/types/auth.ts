@@ -7,13 +7,15 @@
 
 /**
  * Core user object stored in SecureStore and returned by the auth endpoints.
+ * Uses Firebase UID (uid) as the primary identifier.
  * Optional fields are populated once the user completes their profile
  * (POST /profiles/me) and are available on subsequent logins.
  */
 export type User = {
-  id: string;
+  uid: string;
   email: string;
   onboarding_completed: boolean;
+  display_name?: string;
   // Optional profile fields the backend may include
   first_name?: string;
   last_name?: string;
@@ -33,8 +35,8 @@ export type AuthContextType = {
   user: User;
   token: string | null;
   isLoading: boolean;
-  login: (token: string, user: NonNullable<User>) => Promise<void>;
-  register: (token: string, user: NonNullable<User>) => Promise<void>;
+  login: (token: string, user: NonNullable<User>, refreshToken?: string) => Promise<void>;
+  register: (token: string, user: NonNullable<User>, refreshToken?: string) => Promise<void>;
   markOnboardingComplete: () => Promise<void>;
   logout: () => Promise<void>;
 };

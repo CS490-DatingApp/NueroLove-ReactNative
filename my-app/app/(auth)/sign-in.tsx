@@ -55,7 +55,7 @@ export default function SignInScreen() {
       } catch {}
       if (!res.ok) throw new Error((data.detail as string) || "Invalid email or password");
       // login() persists credentials; NavigationGuard handles the redirect
-      await login(data.token, data.user);
+      await login(data.token as string, data.user as NonNullable<import("@/types/auth").User>, data.refresh_token as string);
     } catch (err) {
       setApiError(err instanceof Error ? err.message : "Something went wrong. Try again.");
     }

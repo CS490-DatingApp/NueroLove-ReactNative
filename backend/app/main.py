@@ -1,19 +1,9 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_db
-from app.routers import auth, chat, matches, profiles
+from app.routers import auth, chat, conversations, matches, onboarding, profiles, safety
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await init_db()
-    yield
-
-
-app = FastAPI(title="Neuro API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Neruo API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,10 +13,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(profiles.router, prefix="/profiles", tags=["profiles"])
-app.include_router(matches.router, prefix="/matches", tags=["matches"])
-app.include_router(chat.router, prefix="/chat", tags=["chat"])
+app.include_router(auth.router)
+app.include_router(profiles.router)
+app.include_router(matches.router)
+app.include_router(chat.router)
+app.include_router(onboarding.router)
+app.include_router(safety.router)
+app.include_router(conversations.router)
 
 
 @app.get("/health")

@@ -1,65 +1,182 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
+from typing import Optional
 
-import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
-from jose import jwt
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+import requests as http_requests
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, EmailStr
 
+from app.adapters import firebase_auth
+from app.adapters.firestore_client import get_firestore_client
+from app.adapters.qdrant_adapter import COLLECTION_NAME, uid_to_qdrant_id
 from app.config import settings
-from app.dependencies import get_db
-from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.deps import CurrentUser, get_current_user, get_qdrant
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    display_name: Optional[str] = None
 
 
-def _verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
 
-def _create_token(user_id: str) -> str:
-    expire = datetime.utcnow() + timedelta(days=settings.jwt_expire_days)
-    return jwt.encode(
-        {"sub": user_id, "exp": expire},
-        settings.jwt_secret,
-        algorithm=settings.jwt_algorithm,
-    )
+@router.post("/register", status_code=201)
+def register(req: RegisterRequest):
+    try:
+        user = firebase_auth.create_user(
+            email=req.email,
+            password=req.password,
+            display_name=req.display_name,
+        )
+
+        db = get_firestore_client()
+        profile_data = {
+            "uid": user.uid,
+            "email": req.email,
+            "display_name": user.display_name,
+            "onboarding_completed": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login": None,
+            "email_verified": False,
+        }
+        db.collection("profiles").document(user.uid).set(profile_data)
+
+        # Sign in to get an ID token for the client
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={settings.firebase_web_api_key}"
+        sign_in_resp = http_requests.post(
+            url,
+            json={
+                "email": req.email,
+                "password": req.password,
+                "returnSecureToken": True,
+            },
+        )
+        sign_in_data = sign_in_resp.json()
+        token = sign_in_data.get("idToken", "")
+
+        return {
+            "token": token,
+            "refresh_token": sign_in_data.get("refreshToken", ""),
+            "user": {
+                "uid": user.uid,
+                "email": req.email,
+                "onboarding_completed": False,
+                "display_name": user.display_name,
+            },
+        }
+
+    except Exception as e:
+        detail = str(e)
+        if "EMAIL_EXISTS" in detail or "already exists" in detail.lower():
+            raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail=f"Registration failed: {detail}")
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
+@router.post("/login")
+def login(req: LoginRequest):
+    try:
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={settings.firebase_web_api_key}"
+        resp = http_requests.post(
+            url,
+            json={
+                "email": req.email,
+                "password": req.password,
+                "returnSecureToken": True,
+            },
+        )
+        data = resp.json()
 
-    user = User(
-        email=body.email,
-        password_hash=_hash_password(body.password),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
+        if "error" in data:
+            raise HTTPException(status_code=401, detail=data["error"]["message"])
 
-    return TokenResponse(
-        token=_create_token(user.id),
-        user=UserOut(id=user.id, email=user.email, onboarding_completed=user.onboarding_completed),
-    )
+        uid = data["localId"]
+
+        # Fetch profile from Firestore
+        db = get_firestore_client()
+        doc = db.collection("profiles").document(uid).get()
+        profile = doc.to_dict() if doc.exists else {}
+
+        # Update last_login
+        db.collection("profiles").document(uid).update(
+            {"last_login": datetime.now(timezone.utc).isoformat()}
+        )
+
+        return {
+            "token": data["idToken"],
+            "refresh_token": data.get("refreshToken", ""),
+            "user": {
+                "uid": uid,
+                "email": data["email"],
+                "onboarding_completed": profile.get("onboarding_completed", False),
+                "display_name": profile.get("display_name"),
+                "first_name": profile.get("first_name"),
+                "last_name": profile.get("last_name"),
+                "bio": profile.get("bio"),
+                "city": profile.get("city"),
+                "state": profile.get("state"),
+                "job_title": profile.get("job_title"),
+                "school": profile.get("school"),
+                "height_cm": profile.get("height_cm"),
+                "pronouns": profile.get("pronouns"),
+                "looking_for": profile.get("looking_for"),
+                "interests": profile.get("interests", []),
+                "photos": profile.get("photos", []),
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Login error: {e}")
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+@router.get("/me")
+def get_me(current_user: CurrentUser = Depends(get_current_user)):
+    db = get_firestore_client()
+    doc = db.collection("profiles").document(current_user.uid).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    profile = doc.to_dict()
+    return {
+        "uid": current_user.uid,
+        "email": current_user.email,
+        "onboarding_completed": profile.get("onboarding_completed", False),
+        "display_name": profile.get("display_name"),
+        "first_name": profile.get("first_name"),
+        "last_name": profile.get("last_name"),
+        "bio": profile.get("bio"),
+        "city": profile.get("city"),
+        "state": profile.get("state"),
+        "job_title": profile.get("job_title"),
+        "school": profile.get("school"),
+        "height_cm": profile.get("height_cm"),
+        "pronouns": profile.get("pronouns"),
+        "looking_for": profile.get("looking_for"),
+        "interests": profile.get("interests", []),
+        "photos": profile.get("photos", []),
+    }
 
-    if not user or not _verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    return TokenResponse(
-        token=_create_token(user.id),
-        user=UserOut(id=user.id, email=user.email, onboarding_completed=user.onboarding_completed),
-    )
+@router.delete("/delete-account")
+def delete_account(current_user: CurrentUser = Depends(get_current_user)):
+    uid = current_user.uid
+    try:
+        db = get_firestore_client()
+        db.collection("profiles").document(uid).delete()
+
+        qdrant = get_qdrant()
+        if qdrant:
+            try:
+                qdrant.delete(COLLECTION_NAME, [uid_to_qdrant_id(uid)])
+            except Exception:
+                pass
+
+        firebase_auth.delete_user(uid)
+        return {"message": "Account deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error deleting account: {e}")

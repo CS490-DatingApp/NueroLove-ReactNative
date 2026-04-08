@@ -2,27 +2,63 @@
  * context/AuthProvider.tsx — Authentication Context
  *
  * Responsibilities:
- *   - Persists token + user to expo-secure-store so sessions survive app restarts
+ *   - Persists Firebase ID token + user to expo-secure-store so sessions survive app restarts
  *   - Exposes auth state (user, token, isLoading) to the whole app
  *   - Provides login / register / logout / markOnboardingComplete actions
  *
  * Navigation after auth actions is handled by NavigationGuard in
  * app/_layout.tsx, which watches user state and redirects accordingly.
  * The only explicit redirect here is logout() → sign-in (intentional action).
+ *
+ * Note: Firebase ID tokens expire after 1 hour. On app rehydration, we
+ * attempt to refresh the token via GET /auth/me. If it fails, we log out.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as SecureStore from "expo-secure-store";
 import type { AuthContextType, User } from "@/types/auth";
+
+const FIREBASE_WEB_API_KEY = process.env.EXPO_PUBLIC_FIREBASE_WEB_API_KEY ?? "";
+
+async function refreshFirebaseToken(refreshToken: string): Promise<{ idToken: string; refreshToken: string } | null> {
+  try {
+    const res = await fetch(
+      `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_WEB_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { idToken: data.id_token, refreshToken: data.refresh_token };
+  } catch {
+    return null;
+  }
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [token, setToken] = useState<string | null>(null);
-  // isLoading is true until SecureStore has been read — used by NavigationGuard
-  // to avoid redirecting before we know the auth state
   const [isLoading, setIsLoading] = useState(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRefresh = useCallback((refreshToken: string) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    // Refresh after 55 minutes (tokens expire at 60 min)
+    refreshTimerRef.current = setTimeout(async () => {
+      const result = await refreshFirebaseToken(refreshToken);
+      if (result) {
+        setToken(result.idToken);
+        await SecureStore.setItemAsync("token", result.idToken);
+        await SecureStore.setItemAsync("refresh_token", result.refreshToken);
+        scheduleRefresh(result.refreshToken);
+      }
+    }, 55 * 60 * 1000);
+  }, []);
 
   // On mount: hydrate auth state from secure storage
   useEffect(() => {
@@ -30,41 +66,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const savedToken = await SecureStore.getItemAsync("token");
         const savedUser = await SecureStore.getItemAsync("user");
-        if (savedToken) setToken(savedToken);
-        if (savedUser) setUser(JSON.parse(savedUser));
+        const savedRefreshToken = await SecureStore.getItemAsync("refresh_token");
+        if (savedToken && savedUser) {
+          setToken(savedToken);
+          setUser(JSON.parse(savedUser));
+          if (savedRefreshToken) scheduleRefresh(savedRefreshToken);
+        }
       } catch {
-        // Corrupted storage — wipe and start fresh
         await SecureStore.deleteItemAsync("token").catch(() => {});
         await SecureStore.deleteItemAsync("user").catch(() => {});
+        await SecureStore.deleteItemAsync("refresh_token").catch(() => {});
       } finally {
         setIsLoading(false);
       }
     })();
+    return () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); };
   }, []);
 
   /**
    * login() — called after a successful sign-in.
-   * Persists credentials and updates state. NavigationGuard
+   * Persists Firebase ID token and user. NavigationGuard
    * detects the user change and redirects to the right screen.
    */
-  const login = useCallback(async (newToken: string, newUser: NonNullable<User>) => {
+  const login = useCallback(async (newToken: string, newUser: NonNullable<User>, refreshToken?: string) => {
     setToken(newToken);
     setUser(newUser);
     await SecureStore.setItemAsync("token", newToken);
     await SecureStore.setItemAsync("user", JSON.stringify(newUser));
-    // NavigationGuard handles the redirect — no explicit router.replace here
-  }, []);
+    if (refreshToken) {
+      await SecureStore.setItemAsync("refresh_token", refreshToken);
+      scheduleRefresh(refreshToken);
+    }
+  }, [scheduleRefresh]);
 
-  /**
-   * register() — called at step 0 of sign-up after the account is created.
-   * Does NOT redirect — the user continues filling their profile in the same flow.
-   */
-  const register = useCallback(async (newToken: string, newUser: NonNullable<User>) => {
+  const register = useCallback(async (newToken: string, newUser: NonNullable<User>, refreshToken?: string) => {
     setToken(newToken);
     setUser(newUser);
     await SecureStore.setItemAsync("token", newToken);
     await SecureStore.setItemAsync("user", JSON.stringify(newUser));
-  }, []);
+    if (refreshToken) {
+      await SecureStore.setItemAsync("refresh_token", refreshToken);
+      scheduleRefresh(refreshToken);
+    }
+  }, [scheduleRefresh]);
 
   /**
    * markOnboardingComplete() — called when the user finishes the onboarding chat.
@@ -81,11 +125,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * logout() — clears all credentials. NavigationGuard handles the redirect.
    */
   const logout = useCallback(async () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     setToken(null);
     setUser(null);
     await SecureStore.deleteItemAsync("token");
     await SecureStore.deleteItemAsync("user");
-    // NavigationGuard detects user === null and redirects to sign-in
+    await SecureStore.deleteItemAsync("refresh_token");
   }, []);
 
   const value = useMemo(

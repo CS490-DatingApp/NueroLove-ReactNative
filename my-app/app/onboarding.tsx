@@ -109,6 +109,8 @@ export default function OnboardingChat() {
         role: m.role === "ai" ? "assistant" : "user",
         text: m.text,
       }));
+
+      // Save the onboarding transcript
       await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/chat/onboarding/save`, {
         method: "POST",
         headers: {
@@ -116,6 +118,20 @@ export default function OnboardingChat() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ messages: payload }),
+      });
+
+      // Summarize conversation → embed personality → store in Qdrant
+      const conversationText = messages
+        .map((m) => `${m.role === "ai" ? "AI" : "User"}: ${m.text}`)
+        .join("\n");
+
+      await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/onboarding/summarize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ conversation: conversationText }),
       });
     } catch {
       // Non-fatal — still let user in; the flag will sync on next login
