@@ -35,6 +35,7 @@ import { ScreenHeader } from "@/components/ui/ScreenHeader";
 import { Button } from "@/components/ui/Button";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 
 /* ─── types ──────────────────────────────────────────────────────────────── */
 
@@ -139,16 +140,7 @@ function ProfileDetailModal({
     if (!profile || liking) return;
     setLiking(true);
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_API_BASE_URL}/matches/${profile.id}/like`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        },
-      );
+      const res = await apiFetch(`/matches/${profile.id}/like`, { method: "POST" });
       const data = await res.json();
       setLiked(true);
       if (data.match) setMatchAlert(true);
@@ -168,13 +160,7 @@ function ProfileDetailModal({
         style: "destructive",
         onPress: async () => {
           try {
-            await fetch(
-              `${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/${profile.id}/block`,
-              {
-                method: "POST",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              },
-            );
+            await apiFetch(`/profiles/${profile.id}/block`, { method: "POST" });
             onClose();
           } catch {}
         },
@@ -191,17 +177,10 @@ function ProfileDetailModal({
         style: "destructive",
         onPress: async () => {
           try {
-            await fetch(
-              `${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/${profile.id}/report`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ reason: "Reported from explore" }),
-              },
-            );
+            await apiFetch(`/profiles/${profile.id}/report`, {
+              method: "POST",
+              body: JSON.stringify({ reason: "Reported from explore" }),
+            });
             Alert.alert("Reported", "Thank you for your report.");
           } catch {}
         },
@@ -321,10 +300,7 @@ export default function ExploreScreen() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_API_BASE_URL}/matches/discover`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-      );
+      const res = await apiFetch("/matches/discover");
       if (!res.ok) throw new Error("Failed to load matches");
       const data: any[] = await res.json();
 

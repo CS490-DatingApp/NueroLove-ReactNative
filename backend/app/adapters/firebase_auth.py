@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import firebase_admin
-from firebase_xadmin import auth, credentials
+from firebase_admin import auth, credentials
 
 from app.config import settings
 

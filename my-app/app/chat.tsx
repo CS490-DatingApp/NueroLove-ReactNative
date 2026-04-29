@@ -25,18 +25,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Purple } from "@/constants/theme";
 import { MessageBubble, TypingIndicator } from "@/components/chat-bubbles";
 import { useChat } from "@/context/ChatContext";
-import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import type { Message } from "@/types/chat";
 
 /* ─── Backend chat proxy ─────────────────────────────────────────────────── */
 
-async function fetchAIReply(history: Message[], token: string | null): Promise<string> {
-  const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/chat`, {
+async function fetchAIReply(history: Message[]): Promise<string> {
+  const res = await apiFetch("/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify({
       messages: history.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", text: m.text })),
       context: "coaching",
@@ -59,7 +55,6 @@ const WELCOME_MESSAGE: Message = {
 
 export default function ChatScreen() {
   const { messages, appendMessage } = useChat();
-  const { token } = useAuth();
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -87,7 +82,7 @@ export default function ChatScreen() {
     setIsTyping(true);
 
     try {
-      const reply = await fetchAIReply(history, token);
+      const reply = await fetchAIReply(history);
       appendMessage({ id: (Date.now() + 1).toString(), role: "ai", text: reply });
     } catch {
       appendMessage({

@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 
 type Message = {
   id: string;
@@ -40,7 +41,7 @@ export default function ConversationScreen() {
     partnerName: string;
     partnerPhoto?: string;
   }>();
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList>(null);
 
@@ -49,14 +50,9 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const base = process.env.EXPO_PUBLIC_API_BASE_URL;
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
-
   const fetchMessages = useCallback(async () => {
     try {
-      const res = await fetch(`${base}/conversations/${partnerUid}`, {
-        headers: authHeader,
-      });
+      const res = await apiFetch(`/conversations/${partnerUid}`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -65,7 +61,7 @@ export default function ConversationScreen() {
     finally {
       setLoading(false);
     }
-  }, [partnerUid, token]);
+  }, [partnerUid]);
 
   // Initial load
   useEffect(() => {
@@ -102,9 +98,8 @@ export default function ConversationScreen() {
     setSending(true);
 
     try {
-      await fetch(`${base}/conversations/${partnerUid}`, {
+      await apiFetch(`/conversations/${partnerUid}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ text }),
       });
       // Fetch real messages to replace optimistic

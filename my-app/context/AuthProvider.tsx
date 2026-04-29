@@ -15,7 +15,7 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import * as SecureStore from "expo-secure-store";
+import { setItem, getItem, deleteItem } from "@/utils/storage";
 import type { AuthContextType, User } from "@/types/auth";
 
 const FIREBASE_WEB_API_KEY = process.env.EXPO_PUBLIC_FIREBASE_WEB_API_KEY ?? "";
@@ -53,8 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await refreshFirebaseToken(refreshToken);
       if (result) {
         setToken(result.idToken);
-        await SecureStore.setItemAsync("token", result.idToken);
-        await SecureStore.setItemAsync("refresh_token", result.refreshToken);
+        await setItem("token", result.idToken);
+        await setItem("refresh_token", result.refreshToken);
         scheduleRefresh(result.refreshToken);
       }
     }, 55 * 60 * 1000);
@@ -64,18 +64,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const savedToken = await SecureStore.getItemAsync("token");
-        const savedUser = await SecureStore.getItemAsync("user");
-        const savedRefreshToken = await SecureStore.getItemAsync("refresh_token");
+        const savedToken = await getItem("token");
+        const savedUser = await getItem("user");
+        const savedRefreshToken = await getItem("refresh_token");
         if (savedToken && savedUser) {
-          setToken(savedToken);
-          setUser(JSON.parse(savedUser));
-          if (savedRefreshToken) scheduleRefresh(savedRefreshToken);
+          if (savedRefreshToken) {
+            // Always refresh on relaunch — token may be expired
+            const result = await refreshFirebaseToken(savedRefreshToken);
+            if (result) {
+              setToken(result.idToken);
+              setUser(JSON.parse(savedUser));
+              await setItem("token", result.idToken);
+              await setItem("refresh_token", result.refreshToken);
+              scheduleRefresh(result.refreshToken);
+            } else {
+              // Refresh token invalid/revoked — force logout
+              await deleteItem("token").catch(() => {});
+              await deleteItem("user").catch(() => {});
+              await deleteItem("refresh_token").catch(() => {});
+            }
+          } else {
+            // No refresh token — use saved token as-is (best effort)
+            setToken(savedToken);
+            setUser(JSON.parse(savedUser));
+          }
         }
       } catch {
-        await SecureStore.deleteItemAsync("token").catch(() => {});
-        await SecureStore.deleteItemAsync("user").catch(() => {});
-        await SecureStore.deleteItemAsync("refresh_token").catch(() => {});
+        await deleteItem("token").catch(() => {});
+        await deleteItem("user").catch(() => {});
+        await deleteItem("refresh_token").catch(() => {});
       } finally {
         setIsLoading(false);
       }
@@ -91,10 +108,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (newToken: string, newUser: NonNullable<User>, refreshToken?: string) => {
     setToken(newToken);
     setUser(newUser);
-    await SecureStore.setItemAsync("token", newToken);
-    await SecureStore.setItemAsync("user", JSON.stringify(newUser));
+    await setItem("token", newToken);
+    await setItem("user", JSON.stringify(newUser));
     if (refreshToken) {
-      await SecureStore.setItemAsync("refresh_token", refreshToken);
+      await setItem("refresh_token", refreshToken);
       scheduleRefresh(refreshToken);
     }
   }, [scheduleRefresh]);
@@ -102,10 +119,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (newToken: string, newUser: NonNullable<User>, refreshToken?: string) => {
     setToken(newToken);
     setUser(newUser);
-    await SecureStore.setItemAsync("token", newToken);
-    await SecureStore.setItemAsync("user", JSON.stringify(newUser));
+    await setItem("token", newToken);
+    await setItem("user", JSON.stringify(newUser));
     if (refreshToken) {
-      await SecureStore.setItemAsync("refresh_token", refreshToken);
+      await setItem("refresh_token", refreshToken);
       scheduleRefresh(refreshToken);
     }
   }, [scheduleRefresh]);
@@ -118,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     const updated = { ...user, onboarding_completed: true };
     setUser(updated);
-    await SecureStore.setItemAsync("user", JSON.stringify(updated));
+    await setItem("user", JSON.stringify(updated));
   }, [user]);
 
   /**
@@ -128,9 +145,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     setToken(null);
     setUser(null);
-    await SecureStore.deleteItemAsync("token");
-    await SecureStore.deleteItemAsync("user");
-    await SecureStore.deleteItemAsync("refresh_token");
+    await deleteItem("token");
+    await deleteItem("user");
+    await deleteItem("refresh_token");
   }, []);
 
   const value = useMemo(

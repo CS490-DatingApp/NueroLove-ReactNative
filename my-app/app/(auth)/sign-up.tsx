@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import { uploadPhotos } from "@/utils/uploadPhoto";
 import {
   GENDERS,
@@ -669,9 +670,8 @@ export default function ProfileCreate(): React.JSX.Element {
       setRegistering(true);
       setSubmitError(null);
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/register`, {
+        const res = await apiFetch("/auth/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: values.email, password: values.password }),
         });
         let data: Record<string, unknown> = {};
@@ -730,12 +730,8 @@ export default function ProfileCreate(): React.JSX.Element {
               // Upload local photos to Cloudinary first
               const uploadedPhotos = await uploadPhotos(payload.photos);
 
-              const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
+              const res = await apiFetch("/profiles/me", {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
                 body: JSON.stringify({
                   first_name: payload.firstName,
                   last_name: payload.lastName ?? null,

@@ -1,17 +1,5 @@
 /**
  * app/(tabs)/settings.tsx — Profile / Settings Screen
- *
- * Responsibilities:
- *   - Fetches the user's saved profile from GET /profiles/me on mount
- *   - Lets the user edit bio, location, job, interests, and photos
- *   - Saves changes to POST /profiles/me (only shown when form is dirty)
- *   - Houses the Log Out button under the Account section
- *
- * Style objects are split by sub-component scope:
- *   s  — main screen layout
- *   ps — PhotoSlot component
- *   cs — ChipSelect component
- *   sec — SectionTitle component
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -32,9 +20,9 @@ import { Image } from "expo-image";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { ScreenHeader } from "@/components/ui/ScreenHeader";
 import { Purple } from "@/constants/theme";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import { uploadPhotos } from "@/utils/uploadPhoto";
 import {
   INTEREST_OPTIONS,
@@ -44,10 +32,9 @@ import {
 } from "@/constants/profile";
 import type { LookingFor } from "@/types/profile";
 
-/* ─── dimensions ─────────────────────────────────────────────────────────── */
-
 const { width: W } = Dimensions.get("window");
-const SLOT_SIZE = (W - 40 - 16) / 3;
+// W - 32 (screen padding 16×2) - 32 (card body padding 16×2) - 16 (2 gaps of 8)
+const SLOT_SIZE = Math.floor((W - 80) / 3);
 
 /* ─── photo slot ─────────────────────────────────────────────────────────── */
 
@@ -92,7 +79,7 @@ function PhotoSlot({
   );
 }
 
-/* ─── chip selectors ─────────────────────────────────────────────────────── */
+/* ─── chip selector ──────────────────────────────────────────────────────── */
 
 function ChipSelect<T extends string>({
   value,
@@ -121,17 +108,63 @@ function ChipSelect<T extends string>({
   );
 }
 
-/* ─── section divider ────────────────────────────────────────────────────── */
+/* ─── section card ───────────────────────────────────────────────────────── */
 
-function SectionTitle({ title }: { title: string }) {
+function SectionCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <View style={sec.container}>
-      <Text style={sec.title}>{title}</Text>
+    <View style={sc.card}>
+      <View style={sc.header}>
+        <View style={sc.iconBadge}>
+          <Text style={sc.iconText}>{icon}</Text>
+        </View>
+        <Text style={sc.title}>{title}</Text>
+      </View>
+      <View style={sc.body}>{children}</View>
     </View>
   );
 }
 
-/* ─── form state type ────────────────────────────────────────────────────── */
+/* ─── row item (for account actions) ─────────────────────────────────────── */
+
+function RowItem({
+  icon,
+  label,
+  sublabel,
+  onPress,
+  destructive,
+}: {
+  icon: string;
+  label: string;
+  sublabel?: string;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [ri.row, pressed && ri.pressed]}
+    >
+      <View style={ri.left}>
+        <Text style={ri.icon}>{icon}</Text>
+        <View>
+          <Text style={[ri.label, destructive && ri.destructiveText]}>{label}</Text>
+          {sublabel ? <Text style={ri.sublabel}>{sublabel}</Text> : null}
+        </View>
+      </View>
+      <Text style={[ri.chevron, destructive && ri.destructiveText]}>›</Text>
+    </Pressable>
+  );
+}
+
+/* ─── form state ─────────────────────────────────────────────────────────── */
 
 type FormState = {
   bio: string;
@@ -173,17 +206,14 @@ export default function SettingsScreen() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [original, setOriginal] = useState<FormState>(EMPTY_FORM);
 
-  const isDirty =
-    JSON.stringify(form) !== JSON.stringify(original);
+  const isDirty = JSON.stringify(form) !== JSON.stringify(original);
 
   /* ── fetch profile ──────────────────────────────────────────────────────── */
 
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch("/profiles/me");
       if (!res.ok) throw new Error("not ok");
       const p = await res.json();
 
@@ -207,7 +237,6 @@ export default function SettingsScreen() {
       setForm(loaded);
       setOriginal(loaded);
     } catch {
-      // Fall back to whatever the auth context has cached
       const fallback: FormState = {
         bio: user?.bio ?? "",
         city: user?.city ?? "",
@@ -243,15 +272,10 @@ export default function SettingsScreen() {
     setSaveError(null);
     setSaved(false);
     try {
-      // Upload any new local photos to Cloudinary first
       const uploadedPhotos = await uploadPhotos(form.photos);
 
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
+      const res = await apiFetch("/profiles/me", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({
           bio: form.bio.trim() || null,
           city: form.city.trim() || null,
@@ -276,7 +300,6 @@ export default function SettingsScreen() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
 
-      // Re-embed personality if bio or interests changed
       const bioChanged = form.bio.trim() !== original.bio.trim();
       const interestsChanged = JSON.stringify(form.interests) !== JSON.stringify(original.interests);
       if ((bioChanged || interestsChanged) && token) {
@@ -285,11 +308,10 @@ export default function SettingsScreen() {
           form.interests.length ? `Interests: ${form.interests.join(", ")}.` : "",
           form.lookingFor ? `Looking for: ${form.lookingFor}.` : "",
         ].filter(Boolean).join(" ");
-        fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/onboarding/summarize`, {
+        apiFetch("/onboarding/summarize", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ conversation }),
-        }).catch(() => {}); // fire and forget
+        }).catch(() => {});
       }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Something went wrong");
@@ -346,12 +368,14 @@ export default function SettingsScreen() {
     return [first, last].filter(Boolean).join(" ") || "Your Profile";
   })();
 
+  const mainPhoto = form.photos.find(Boolean) ?? null;
+
   if (loadingProfile) {
     return (
       <View style={[s.screen, { paddingTop: insets.top }]}>
-        <ScreenHeader title="Profile" />
         <View style={s.loadingCenter}>
           <ActivityIndicator size="large" color={Purple.primary} />
+          <Text style={s.loadingText}>Loading profile…</Text>
         </View>
       </View>
     );
@@ -359,17 +383,18 @@ export default function SettingsScreen() {
 
   return (
     <View style={[s.screen, { paddingTop: insets.top }]}>
-      <ScreenHeader title="Profile" subtitle={displayName} />
-
       <ScrollView
-        contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]}
+        contentContainerStyle={[s.content, { paddingBottom: insets.bottom + (isDirty ? 100 : 40) }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── page title ───────────────────────────────────────────────── */}
+        <Text style={s.pageTitle}>Edit Profile</Text>
+
         {/* ── feedback banners ─────────────────────────────────────────── */}
         {saved && (
           <View style={s.successBanner}>
-            <Text style={s.successText}>✓ Profile saved!</Text>
+            <Text style={s.successText}>✓  Profile saved!</Text>
           </View>
         )}
         {saveError ? (
@@ -378,189 +403,216 @@ export default function SettingsScreen() {
           </View>
         ) : null}
 
-        {/* ── photos ──────────────────────────────────────────────────── */}
-        <SectionTitle title="Photos" />
-        <Text style={s.helper}>Tap a slot to add or change a photo</Text>
-        <View style={s.photoGrid}>
-          {form.photos.map((uri, idx) => (
-            <PhotoSlot
-              key={idx}
-              uri={uri}
-              index={idx}
-              onPick={pickPhoto}
-              onRemove={removePhoto}
-            />
-          ))}
+        {/* ── profile header card ──────────────────────────────────────── */}
+        <View style={s.profileCard}>
+          <View style={s.avatarWrap}>
+            {mainPhoto ? (
+              <Image source={{ uri: mainPhoto }} style={s.avatar} contentFit="cover" />
+            ) : (
+              <View style={s.avatarPlaceholder}>
+                <Text style={s.avatarInitial}>
+                  {(user?.first_name?.[0] ?? "?").toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={s.profileInfo}>
+            <Text style={s.profileName}>{displayName}</Text>
+            <Text style={s.profileSub}>
+              {form.city && form.state
+                ? `${form.city}, ${form.state}`
+                : form.city || form.state || "Add your location"}
+            </Text>
+          </View>
         </View>
+
+        {/* ── photos ──────────────────────────────────────────────────── */}
+        <SectionCard icon="📷" title="Photos">
+          <Text style={s.helper}>Tap a slot to add or change · tap a photo to remove</Text>
+          <View style={s.photoGrid}>
+            {form.photos.map((uri, idx) => (
+              <PhotoSlot
+                key={idx}
+                uri={uri}
+                index={idx}
+                onPick={pickPhoto}
+                onRemove={removePhoto}
+              />
+            ))}
+          </View>
+        </SectionCard>
 
         {/* ── about you ───────────────────────────────────────────────── */}
-        <SectionTitle title="About You" />
-
-        <Input
-          label="Bio"
-          value={form.bio}
-          placeholder="Say something about yourself…"
-          multiline
-          numberOfLines={4}
-          style={s.textarea}
-          helper={`${form.bio.length} / 300`}
-          onChangeText={(v) => setForm((f) => ({ ...f, bio: v.slice(0, 300) }))}
-        />
-
-        <View style={s.row}>
+        <SectionCard icon="✏️" title="About You">
           <Input
-            label="City"
-            value={form.city}
-            placeholder="Los Angeles"
-            onChangeText={(v) => setForm((f) => ({ ...f, city: v }))}
-            containerStyle={s.col}
+            label="Bio"
+            value={form.bio}
+            placeholder="Say something about yourself…"
+            multiline
+            numberOfLines={4}
+            style={s.textarea}
+            helper={`${form.bio.length} / 300 characters`}
+            onChangeText={(v) => setForm((f) => ({ ...f, bio: v.slice(0, 300) }))}
           />
-          <Input
-            label="State"
-            value={form.state}
-            placeholder="CA"
-            autoCapitalize="characters"
-            maxLength={2}
-            onChangeText={(v) => setForm((f) => ({ ...f, state: v }))}
-            containerStyle={{ width: 72 }}
-          />
-        </View>
 
-        <View style={s.row}>
-          <Input
-            label="Job title"
-            value={form.jobTitle}
-            placeholder="Software Engineer"
-            onChangeText={(v) => setForm((f) => ({ ...f, jobTitle: v }))}
-            containerStyle={s.col}
-          />
-          <Input
-            label="School"
-            value={form.school}
-            placeholder="UCLA"
-            onChangeText={(v) => setForm((f) => ({ ...f, school: v }))}
-            containerStyle={s.col}
-          />
-        </View>
+          <View style={s.row}>
+            <Input
+              label="City"
+              value={form.city}
+              placeholder="Los Angeles"
+              onChangeText={(v) => setForm((f) => ({ ...f, city: v }))}
+              containerStyle={s.col}
+            />
+            <Input
+              label="State"
+              value={form.state}
+              placeholder="CA"
+              autoCapitalize="characters"
+              maxLength={2}
+              onChangeText={(v) => setForm((f) => ({ ...f, state: v }))}
+              containerStyle={{ width: 72 }}
+            />
+          </View>
 
-        <Input
-          label="Height (cm)"
-          value={form.heightCm}
-          placeholder="175"
-          keyboardType="number-pad"
-          style={{ width: 100 }}
-          onChangeText={(v) => setForm((f) => ({ ...f, heightCm: v }))}
-        />
+          <View style={s.row}>
+            <Input
+              label="Job title"
+              value={form.jobTitle}
+              placeholder="Software Engineer"
+              onChangeText={(v) => setForm((f) => ({ ...f, jobTitle: v }))}
+              containerStyle={s.col}
+            />
+            <Input
+              label="School"
+              value={form.school}
+              placeholder="UCLA"
+              onChangeText={(v) => setForm((f) => ({ ...f, school: v }))}
+              containerStyle={s.col}
+            />
+          </View>
+
+          <Input
+            label="Height (cm)"
+            value={form.heightCm}
+            placeholder="175"
+            keyboardType="number-pad"
+            style={{ width: 100 }}
+            onChangeText={(v) => setForm((f) => ({ ...f, heightCm: v }))}
+          />
+        </SectionCard>
 
         {/* ── identity ────────────────────────────────────────────────── */}
-        <SectionTitle title="Identity" />
-
-        <Input
-          label="Pronouns"
-          value={form.pronouns}
-          placeholder="he/him · she/her · they/them…"
-          onChangeText={(v) => setForm((f) => ({ ...f, pronouns: v }))}
-        />
+        <SectionCard icon="🏳️‍🌈" title="Identity">
+          <Input
+            label="Pronouns"
+            value={form.pronouns}
+            placeholder="he/him · she/her · they/them…"
+            onChangeText={(v) => setForm((f) => ({ ...f, pronouns: v }))}
+          />
+        </SectionCard>
 
         {/* ── looking for ─────────────────────────────────────────────── */}
-        <SectionTitle title="Looking For" />
-        <View style={s.fieldBlock}>
+        <SectionCard icon="💞" title="Looking For">
           <ChipSelect<LookingFor>
             value={form.lookingFor}
             options={LOOKING_FOR}
             onChange={(v) => setForm((f) => ({ ...f, lookingFor: v }))}
           />
-        </View>
+        </SectionCard>
 
         {/* ── interests ───────────────────────────────────────────────── */}
-        <SectionTitle title="Interests" />
-        <View style={s.interestHeader}>
-          <Text style={s.helper}>Pick up to {MAX_INTERESTS}</Text>
-          <Text
-            style={[
-              s.interestCount,
-              form.interests.length === MAX_INTERESTS && s.interestCountMax,
-            ]}
-          >
-            {form.interests.length}/{MAX_INTERESTS}
-          </Text>
-        </View>
-        <View style={s.interestGrid}>
-          {INTEREST_OPTIONS.map((interest) => {
-            const active = form.interests.includes(interest);
-            const disabled = !active && form.interests.length >= MAX_INTERESTS;
-            return (
-              <Pressable
-                key={interest}
-                onPress={() => toggleInterest(interest)}
-                disabled={disabled}
-                style={[
-                  s.interestChip,
-                  active && s.interestChipActive,
-                  disabled && s.interestChipDisabled,
-                ]}
-              >
-                <Text
+        <SectionCard icon="✨" title="Interests">
+          <View style={s.interestHeader}>
+            <Text style={s.helper}>Pick up to {MAX_INTERESTS}</Text>
+            <View style={[
+              s.interestBadge,
+              form.interests.length === MAX_INTERESTS && s.interestBadgeMax,
+            ]}>
+              <Text style={[
+                s.interestBadgeText,
+                form.interests.length === MAX_INTERESTS && s.interestBadgeTextMax,
+              ]}>
+                {form.interests.length}/{MAX_INTERESTS}
+              </Text>
+            </View>
+          </View>
+          <View style={s.interestGrid}>
+            {INTEREST_OPTIONS.map((interest) => {
+              const active = form.interests.includes(interest);
+              const disabled = !active && form.interests.length >= MAX_INTERESTS;
+              return (
+                <Pressable
+                  key={interest}
+                  onPress={() => toggleInterest(interest)}
+                  disabled={disabled}
                   style={[
-                    s.interestChipText,
-                    active && s.interestChipTextActive,
+                    s.interestChip,
+                    active && s.interestChipActive,
+                    disabled && s.interestChipDisabled,
                   ]}
                 >
-                  {interest}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                  <Text style={[s.interestChipText, active && s.interestChipTextActive]}>
+                    {interest}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </SectionCard>
 
-        {/* ── save button ──────────────────────────────────────────────── */}
-        {isDirty && (
+        {/* ── account ─────────────────────────────────────────────────── */}
+        <SectionCard icon="⚙️" title="Account">
+          <RowItem
+            icon="🚪"
+            label="Log Out"
+            sublabel="You can always sign back in"
+            onPress={async () => {
+              Alert.alert("Log Out", "Are you sure you want to log out?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Log Out", style: "destructive", onPress: async () => { await logout(); } },
+              ]);
+            }}
+          />
+          <View style={s.divider} />
+          <RowItem
+            icon="🗑️"
+            label="Delete Account"
+            sublabel="Permanently removes all your data"
+            destructive
+            onPress={() => {
+              Alert.alert(
+                "Delete Account",
+                "This will permanently delete your profile, matches, and all data. This cannot be undone.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      try {
+                        await apiFetch("/auth/delete-account", { method: "DELETE" });
+                      } catch {}
+                      await logout();
+                    },
+                  },
+                ]
+              );
+            }}
+          />
+        </SectionCard>
+      </ScrollView>
+
+      {/* ── sticky save bar ─────────────────────────────────────────────── */}
+      {isDirty && (
+        <View style={[s.saveBar, { paddingBottom: insets.bottom + 8 }]}>
           <Button
             label="Save Changes"
             loading={saving}
             loadingLabel="Saving…"
             onPress={handleSave}
-            style={s.saveBtn}
           />
-        )}
-
-        {/* ── account ─────────────────────────────────────────────────── */}
-        <SectionTitle title="Account" />
-        <Button
-          label="Log Out"
-          variant="danger"
-          onPress={async () => {
-            await logout();
-          }}
-        />
-        <Button
-          label="Delete Account"
-          variant="ghost"
-          onPress={() => {
-            Alert.alert(
-              "Delete Account",
-              "This will permanently delete your profile, matches, and all data. This cannot be undone.",
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: async () => {
-                    try {
-                      await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/delete-account`, {
-                        method: "DELETE",
-                        headers: token ? { Authorization: `Bearer ${token}` } : {},
-                      });
-                    } catch {}
-                    await logout();
-                  },
-                },
-              ]
-            );
-          }}
-          style={s.deleteBtn}
-        />
-      </ScrollView>
+        </View>
+      )}
     </View>
   );
 }
@@ -568,48 +620,90 @@ export default function SettingsScreen() {
 /* ─── styles ─────────────────────────────────────────────────────────────── */
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#fff" },
-  loadingCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { padding: 20, gap: 0 },
+  screen: { flex: 1, backgroundColor: "#f5f5f7" },
+  loadingCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  loadingText: { fontSize: 14, color: "#999" },
+
+  content: { paddingHorizontal: 16, paddingTop: 8, gap: 12 },
+
+  pageTitle: { fontSize: 28, fontWeight: "800", color: "#111", marginBottom: 4 },
 
   successBanner: {
     backgroundColor: "#f0fdf4",
     borderWidth: 1,
     borderColor: "#86efac",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 14,
   },
   successText: { color: "#166534", fontSize: 14, fontWeight: "600" },
   errorBanner: {
     backgroundColor: "#fef2f2",
     borderWidth: 1,
     borderColor: "#fecaca",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 14,
   },
   errorText: { color: "#b91c1c", fontSize: 14 },
 
-  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  /* profile header */
+  profileCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  avatarWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: Purple.border,
+  },
+  avatar: { width: "100%", height: "100%" },
+  avatarPlaceholder: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: Purple.faint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitial: { fontSize: 26, fontWeight: "700", color: Purple.primary },
+  profileInfo: { flex: 1 },
+  profileName: { fontSize: 18, fontWeight: "700", color: "#111" },
+  profileSub: { fontSize: 13, color: "#888", marginTop: 2 },
 
+  /* grids */
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
   row: { flexDirection: "row", gap: 10 },
   col: { flex: 1 },
-
   textarea: { minHeight: 100, textAlignVertical: "top" },
   helper: { fontSize: 12, color: "#999", marginBottom: 10 },
 
-  fieldBlock: { marginBottom: 14 },
-
+  /* interests */
   interestHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 10,
   },
-  interestCount: { fontSize: 13, color: "#999" },
-  interestCountMax: { color: Purple.primary, fontWeight: "600" },
-  interestGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
+  interestBadge: {
+    backgroundColor: "#f0f0f0",
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+  },
+  interestBadgeMax: { backgroundColor: Purple.faint },
+  interestBadgeText: { fontSize: 12, color: "#888", fontWeight: "600" },
+  interestBadgeTextMax: { color: Purple.primary },
+  interestGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   interestChip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
@@ -623,8 +717,25 @@ const s = StyleSheet.create({
   interestChipText: { fontSize: 13, color: "#333" },
   interestChipTextActive: { color: "#fff" },
 
-  saveBtn: { marginBottom: 8 },
-  deleteBtn: { marginTop: 8, borderWidth: 0 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: "#eee", marginVertical: 4 },
+
+  /* sticky save */
+  saveBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e5e5",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -3 },
+    elevation: 8,
+  },
 });
 
 const ps = StyleSheet.create({
@@ -655,26 +766,66 @@ const ps = StyleSheet.create({
 });
 
 const cs = StyleSheet.create({
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#ddd",
+    backgroundColor: "#f9f9f9",
   },
   chipActive: { backgroundColor: Purple.primary, borderColor: Purple.primary },
   chipText: { fontSize: 13, color: "#333" },
   chipTextActive: { color: "#fff" },
 });
 
-const sec = StyleSheet.create({
-  container: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5e5",
-    paddingTop: 20,
-    marginBottom: 14,
-    marginTop: 8,
+const sc = StyleSheet.create({
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#f0f0f0",
+  },
+  iconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: Purple.faint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconText: { fontSize: 16 },
   title: { fontSize: 15, fontWeight: "700", color: "#111" },
+  body: { padding: 16, gap: 4 },
+});
+
+const ri = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  pressed: { opacity: 0.6 },
+  left: { flexDirection: "row", alignItems: "center", gap: 12 },
+  icon: { fontSize: 20, width: 28, textAlign: "center" },
+  label: { fontSize: 15, color: "#111", fontWeight: "500" },
+  sublabel: { fontSize: 12, color: "#999", marginTop: 1 },
+  chevron: { fontSize: 22, color: "#ccc", fontWeight: "300" },
+  destructiveText: { color: "#ef4444" },
 });

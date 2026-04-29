@@ -9,12 +9,13 @@
  */
 
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/Button";
 import { ScreenHeader } from "@/components/ui/ScreenHeader";
 import { Purple } from "@/constants/theme";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -81,9 +82,7 @@ export default function MatchesScreen() {
   const loadMatches = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/matches/mine`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch("/matches/mine");
       if (res.ok) {
         const data = await res.json();
         setMatches(data);
@@ -95,9 +94,11 @@ export default function MatchesScreen() {
     }
   }, [token]);
 
-  useEffect(() => {
-    loadMatches();
-  }, [loadMatches]);
+  useFocusEffect(
+    useCallback(() => {
+      loadMatches();
+    }, [loadMatches])
+  );
 
   const lastMessage = messages.at(-1);
   const preview = lastMessage

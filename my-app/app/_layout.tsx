@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
@@ -31,6 +31,7 @@ function NavigationGuard() {
   const { user, isLoading } = useAuth();
   const { clearMessages } = useChat();
   const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
 
   // Track the previous user ID so we know when the account changes
@@ -49,8 +50,14 @@ function NavigationGuard() {
       prevUserIdRef.current = currentUserId;
     }
 
-    const inAuth = segments[0] === "(auth)";
-    const inOnboarding = segments[0] === "onboarding";
+    // On native, route groups appear in segments: segments[0] === "(auth)"
+    // On web, groups are stripped from the URL so we also check pathname
+    const inAuth =
+      segments[0] === "(auth)" ||
+      pathname === "/sign-in" ||
+      pathname === "/sign-up";
+    const inOnboarding =
+      segments[0] === "onboarding" || pathname === "/onboarding";
 
     if (!user) {
       // Not authenticated → sign-in
@@ -64,7 +71,7 @@ function NavigationGuard() {
       // Fully authenticated and onboarded → main app
       if (inAuth || inOnboarding) router.replace("/(tabs)");
     }
-  }, [user, isLoading, segments]);
+  }, [user, isLoading, segments, pathname]);
 
   return null;
 }

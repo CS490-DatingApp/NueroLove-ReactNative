@@ -23,6 +23,7 @@ import { Link } from "expo-router";
 import { Formik } from "formik";
 import * as Yup from "yup";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Purple } from "@/constants/theme";
@@ -44,9 +45,8 @@ export default function SignInScreen() {
   const handleSubmit = async (values: { email: string; password: string }) => {
     setApiError(null);
     try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/login`, {
+      const res = await apiFetch("/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: values.email, password: values.password }),
       });
       let data: Record<string, unknown> = {};

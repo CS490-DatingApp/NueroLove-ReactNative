@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/Button";
 import { MessageBubble, TypingIndicator } from "@/components/chat-bubbles";
 import { useChat } from "@/context/ChatContext";
 import { useAuth } from "@/context/AuthProvider";
+import { apiFetch } from "@/utils/api";
 import type { Message } from "@/types/chat";
 
 /* ─── Backend chat proxy ─────────────────────────────────────────────────── */
@@ -44,15 +45,10 @@ const WELCOME_MESSAGE: Message = {
 
 async function fetchAIReply(
   history: Message[],
-  token: string | null,
   interests: string[],
 ): Promise<string> {
-  const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/chat`, {
+  const res = await apiFetch("/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify({
       messages: history.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", text: m.text })),
       context: "onboarding",
@@ -87,9 +83,7 @@ export default function OnboardingChat() {
     }
     (async () => {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/profiles/me`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        const res = await apiFetch("/profiles/me");
         if (res.ok) {
           const profile = await res.json();
           if (Array.isArray(profile.interests)) setInterests(profile.interests);
@@ -111,12 +105,8 @@ export default function OnboardingChat() {
       }));
 
       // Save the onboarding transcript
-      await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/chat/onboarding/save`, {
+      await apiFetch("/chat/onboarding/save", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({ messages: payload }),
       });
 
@@ -125,12 +115,8 @@ export default function OnboardingChat() {
         .map((m) => `${m.role === "ai" ? "AI" : "User"}: ${m.text}`)
         .join("\n");
 
-      await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/onboarding/summarize`, {
+      await apiFetch("/onboarding/summarize", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({ conversation: conversationText }),
       });
     } catch {
@@ -156,7 +142,7 @@ export default function OnboardingChat() {
     setUserReplyCount((c) => c + 1);
 
     try {
-      const reply = await fetchAIReply(history, token, interests);
+      const reply = await fetchAIReply(history, interests);
       appendMessage({ id: (Date.now() + 1).toString(), role: "ai", text: reply });
     } catch {
       appendMessage({
